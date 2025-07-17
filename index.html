@@ -114,7 +114,6 @@
     </div>
 
 <script>
-    // --- データベースは削除し、APIから動的に生成 ---
     let currentQuestions = [];
 
     const startBtn = document.getElementById('start-btn');
@@ -128,7 +127,6 @@
     checkAnswersBtn.addEventListener('click', checkAnswers);
 
     async function generateQuestionsViaAPI() {
-        // UIの初期化
         startBtn.disabled = true;
         loadingDiv.classList.remove('hidden');
         quizContainer.innerHTML = '';
@@ -138,76 +136,39 @@
         const textbook = document.getElementById('textbook-select').options[document.getElementById('textbook-select').selectedIndex].text;
         const count = parseInt(document.getElementById('q-count').value);
 
-        // --- Gemini APIへのプロンプトを作成 ---
-        const prompt = `
-            あなたは日本の中学3年生向けの英語文法問題を作成する専門家です。
-            以下の条件に従って、高品質な問題を${count}問、JSON形式で生成してください。
-
-            # 条件
-            - 文法単元: 「${unit}」
-            - 想定教科書: 「${textbook}」
-            - 問題形式: 'choice' (選択), 'reorder' (並べ替え), 'form-change' (語形変化), 'fill-in' (空欄補充) のいずれかを適切に割り振ること。
-            - 全ての問題に、自然な日本語訳を付けること。
-            - 高校入試レベルの、典型的で重要な問題を作成すること。
-            - 類義表現や対義表現が学べるような、示唆に富んだ問題にすること。
-            - イディオムや重要な構文を自然に含めること。
-
-            # JSON出力形式
-            - 必ず以下の構造を持つJSON配列として出力してください。
-            - 'reorder'形式の場合、'question'プロパティは単語の配列にしてください。
-            - 'choice'形式の場合、'options'プロパティに3つの選択肢を入れてください。
-
-            [
-              {
-                "id": <ユニークな整数>,
-                "type": "<問題形式>",
-                "question": "<問題文 または 単語の配列>",
-                "options": ["<選択肢1>", "<選択肢2>", "<選択肢3>"], // choice形式の場合のみ
-                "answer": "<正解>",
-                "translation": "<日本語訳>",
-                "unit": "<単元カテゴリ>"
-              }
-            ]
-        `;
-
-        // --- Gemini API呼び出し ---
+        // --- Gemini APIへの直接の呼び出しではなく、中継サーバー（サーバーレス関数）を呼び出す ---
         try {
-            let chatHistory = [];
-            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
-            const payload = { contents: chatHistory };
-            const apiKey = ""; // APIキーは実行環境で自動的に設定されます
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            // このURLはデプロイ先（Netlifyなど）のサーバーレス関数のエンドポイントを指します
+            // 例: Netlifyの場合 '/.netlify/functions/generate-questions'
+            const proxyUrl = '/api/generate-questions'; 
 
-            const response = await fetch(apiUrl, {
+            const response = await fetch(proxyUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify({ unit, textbook, count }) // 必要な情報をサーバーに送る
             });
 
             if (!response.ok) {
-                throw new Error(`API Error: ${response.statusText}`);
+                const errorData = await response.json();
+                throw new Error(errorData.error || `サーバーエラー: ${response.statusText}`);
             }
             
             const result = await response.json();
             
-            if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0]) {
-                const jsonText = result.candidates[0].content.parts[0].text;
-                // マークダウンのコードブロック表記を削除
-                const cleanedJsonText = jsonText.replace(/^```json\n/, '').replace(/\n```$/, '');
-                currentQuestions = JSON.parse(cleanedJsonText);
+            if (result.questions) {
+                currentQuestions = result.questions;
                 displayQuestions();
             } else {
-                throw new Error("APIから予期せぬ形式のレスポンスが返されました。");
+                throw new Error("サーバーから予期せぬ形式のレスポンスが返されました。");
             }
 
         } catch (error) {
             console.error("Error generating questions:", error);
             quizContainer.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg" role="alert">
                 <strong class="font-bold">エラーが発生しました。</strong>
-                <span class="block sm:inline">問題の生成に失敗しました。時間をおいて再度お試しください。</span>
+                <span class="block sm:inline">問題の生成に失敗しました。詳細: ${error.message}</span>
             </div>`;
         } finally {
-            // UIの状態を戻す
             startBtn.disabled = false;
             loadingDiv.classList.add('hidden');
         }
@@ -218,7 +179,8 @@
         currentQuestions.forEach((q, index) => {
             const qDiv = document.createElement('div');
             qDiv.className = 'bg-white p-6 rounded-xl shadow-md';
-            qDiv.id = `q-${q.id}`;
+            // APIが生成するIDが不定なため、インデックスをIDとして使用
+            qDiv.id = `q-${index}`;
 
             let content = `<div class="flex items-start"><span class="text-xl font-bold text-cyan-600 mr-3">${index + 1}.</span><div class="w-full">`;
             
@@ -232,17 +194,17 @@
             if (q.type === 'choice') {
                 content += `<div class="space-y-2">`;
                 q.options.forEach(opt => {
-                    content += `<label class="flex items-center p-2 rounded-md border border-gray-200 hover:bg-gray-50 cursor-pointer"><input type="radio" name="q${q.id}" value="${opt}" class="mr-3 h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300"><span>${opt}</span></label>`;
+                    content += `<label class="flex items-center p-2 rounded-md border border-gray-200 hover:bg-gray-50 cursor-pointer"><input type="radio" name="q${index}" value="${opt}" class="mr-3 h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300"><span>${opt}</span></label>`;
                 });
                 content += `</div>`;
             } else if (q.type === 'reorder') {
-                 content += `<input type="text" id="ans-${q.id}" class="w-full p-2 border border-gray-300 rounded-md mt-2" placeholder="語順を並べ替えてください">`;
+                 content += `<input type="text" id="ans-${index}" class="w-full p-2 border border-gray-300 rounded-md mt-2" placeholder="語順を並べ替えてください">`;
             } else {
-                content += `<input type="text" id="ans-${q.id}" class="w-full p-2 border border-gray-300 rounded-md mt-2" placeholder="適切な語を入れてください">`;
+                content += `<input type="text" id="ans-${index}" class="w-full p-2 border border-gray-300 rounded-md mt-2" placeholder="適切な語を入れてください">`;
             }
 
             content += `<p class="text-sm text-gray-500 mt-3">（${q.translation}）</p>`;
-            content += `<div id="feedback-${q.id}" class="mt-3 text-sm"></div>`;
+            content += `<div id="feedback-${index}" class="mt-3 text-sm"></div>`;
             content += `</div></div>`;
             qDiv.innerHTML = content;
             quizContainer.appendChild(qDiv);
@@ -254,16 +216,16 @@
 
     function checkAnswers() {
         let correctCount = 0;
-        currentQuestions.forEach(q => {
-            const qDiv = document.getElementById(`q-${q.id}`);
-            const feedbackDiv = document.getElementById(`feedback-${q.id}`);
+        currentQuestions.forEach((q, index) => {
+            const qDiv = document.getElementById(`q-${index}`);
+            const feedbackDiv = document.getElementById(`feedback-${index}`);
             let userAnswer;
             
             if (q.type === 'choice') {
-                const selected = document.querySelector(`input[name="q${q.id}"]:checked`);
+                const selected = document.querySelector(`input[name="q${index}"]:checked`);
                 userAnswer = selected ? selected.value : '';
             } else {
-                const input = document.getElementById(`ans-${q.id}`);
+                const input = document.getElementById(`ans-${index}`);
                 userAnswer = input ? input.value.trim() : '';
             }
 
@@ -297,13 +259,8 @@
         
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
-
-        // jsPDFは標準で日本語をサポートしていないため、文字化けする可能性があります。
-        // 正確な日本語表示には、日本語フォントの組み込みが必要です。
-        // ここでは暫定的にフォントを指定しますが、環境によっては文字化けします。
+        
         try {
-            // フォントのBase64データをjsPDFに追加する処理が必要ですが、
-            // ファイルサイズが大きくなるため、ここでは省略し、標準フォントで試みます。
             doc.setFont('helvetica', 'normal');
         } catch(e) {
             console.error("Font loading error:", e);
@@ -326,7 +283,6 @@
             } else if (q.type === 'choice') {
                 questionText += ` ( ${q.options.join(' / ')} )`;
             }
-            // 日本語が文字化けしないように、暫定的に英数字に変換
             const safeQuestion = String(questionText).replace(/[^\x00-\x7F]/g, "?");
             const safeTranslation = q.translation.replace(/[^\x00-\x7F]/g, "?");
             const safeAnswer = q.answer.replace(/[^\x00-\x7F]/g, "?");
