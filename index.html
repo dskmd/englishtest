@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中学英語文法パズルアプリ (Gemini API連携版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+        }
+        .correct {
+            background-color: #e0f7fa;
+            border-left: 5px solid #00bcd4;
+        }
+        .incorrect {
+            background-color: #ffebee;
+            border-left: 5px solid #f44336;
+        }
+        .correct-answer {
+            color: #00796b;
+            font-weight: bold;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #00bcd4;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-4xl">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-cyan-700">中学英語文法パズルアプリ</h1>
+            <p class="text-gray-600 mt-2">AIによる問題自動生成</p>
+        </header>
+
+        <!-- 設定セクション -->
+        <div id="settings" class="bg-white p-6 rounded-xl shadow-lg mb-8">
+            <h2 class="text-2xl font-bold mb-4 border-b pb-2">問題設定</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="unit-select" class="block text-sm font-medium text-gray-700 mb-2">① 単元を選ぶ</label>
+                    <select id="unit-select" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-cyan-500 focus:border-cyan-500">
+                        <option value="random">全単元からランダム</option>
+                        <option value="tenses">時制（現在・過去・未来・進行形）</option>
+                        <option value="auxiliary">助動詞</option>
+                        <option value="infinitive_gerund">不定詞・動名詞</option>
+                        <option value="participle">分詞</option>
+                        <option value="passive">受動態</option>
+                        <option value="perfect">現在完了形</option>
+                        <option value="relative">関係代名詞</option>
+                        <option value="comparison">比較</option>
+                        <option value="subjunctive">仮定法</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="textbook-select" class="block text-sm font-medium text-gray-700 mb-2">② 教科書会社で絞り込む（任意）</label>
+                    <select id="textbook-select" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-cyan-500 focus:border-cyan-500">
+                        <option value="all">すべて</option>
+                        <option value="tokyo_shoseki">東京書籍 (New Horizon)</option>
+                        <option value="kairyudo">開隆堂出版 (Sunshine)</option>
+                        <option value="sanseido">三省堂 (New Crown)</option>
+                        <option value="kyoiku_shuppan">教育出版 (One World)</option>
+                        <option value="mitsumura">光村図書 (Here We Go!)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-6">
+                <label for="q-count" class="block text-sm font-medium text-gray-700 mb-2">③ 問題数</label>
+                <select id="q-count" class="w-full md:w-1/3 p-2 border border-gray-300 rounded-md shadow-sm focus:ring-cyan-500 focus:border-cyan-500">
+                    <option value="10">10問</option>
+                    <option value="15">15問</option>
+                    <option value="20">20問</option>
+                </select>
+            </div>
+            <div class="mt-6 text-center">
+                <button id="start-btn" class="w-full md:w-1/2 bg-cyan-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-cyan-700 transition duration-300 shadow-md disabled:bg-gray-400">
+                    演習スタート
+                </button>
+            </div>
+        </div>
+
+        <!-- ローディング表示 -->
+        <div id="loading" class="text-center hidden">
+            <div class="loader"></div>
+            <p>AIが問題を生成中です。しばらくお待ちください...</p>
+        </div>
+
+        <!-- 問題表示セクション -->
+        <div id="quiz-container" class="space-y-4"></div>
+
+        <!-- 結果・操作ボタンセクション -->
+        <div id="controls" class="bg-white p-6 rounded-xl shadow-lg mt-8 text-center hidden">
+            <div id="result-text" class="text-2xl font-bold mb-6"></div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <button id="check-answers-btn" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-600 transition duration-300">答え合わせ</button>
+                <button id="pdf-questions-btn" class="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-600 transition duration-300">問題PDFダウンロード</button>
+                <button id="pdf-answers-btn" class="w-full bg-purple-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-purple-600 transition duration-300">解答PDFダウンロード</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    let currentQuestions = [];
+
+    const startBtn = document.getElementById('start-btn');
+    const quizContainer = document.getElementById('quiz-container');
+    const controlsDiv = document.getElementById('controls');
+    const loadingDiv = document.getElementById('loading');
+    const checkAnswersBtn = document.getElementById('check-answers-btn');
+    const resultText = document.getElementById('result-text');
+
+    startBtn.addEventListener('click', generateQuestionsViaAPI);
+    checkAnswersBtn.addEventListener('click', checkAnswers);
+
+    async function generateQuestionsViaAPI() {
+        startBtn.disabled = true;
+        loadingDiv.classList.remove('hidden');
+        quizContainer.innerHTML = '';
+        controlsDiv.classList.add('hidden');
+
+        const unit = document.getElementById('unit-select').options[document.getElementById('unit-select').selectedIndex].text;
+        const textbook = document.getElementById('textbook-select').options[document.getElementById('textbook-select').selectedIndex].text;
+        const count = parseInt(document.getElementById('q-count').value);
+
+        // --- Gemini APIへの直接の呼び出しではなく、中継サーバー（サーバーレス関数）を呼び出す ---
+        try {
+            // このURLはデプロイ先（Netlifyなど）のサーバーレス関数のエンドポイントを指します
+            // 例: Netlifyの場合 '/.netlify/functions/generate-questions'
+            const proxyUrl = '/api/generate-questions';
+
+            const response = await fetch(proxyUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ unit, textbook, count }) // 必要な情報をサーバーに送る
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `サーバーエラー: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+
+            if (result.questions) {
+                currentQuestions = result.questions;
+                displayQuestions();
+            } else {
+                throw new Error("サーバーから予期せぬ形式のレスポンスが返されました。");
+            }
+
+        } catch (error) {
+            console.error("Error generating questions:", error);
+            quizContainer.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg" role="alert">
+                <strong class="font-bold">エラーが発生しました。</strong>
+                <span class="block sm:inline">問題の生成に失敗しました。詳細: ${error.message}</span>
+            </div>`;
+        } finally {
+            startBtn.disabled = false;
+            loadingDiv.classList.add('hidden');
+        }
+    }
+
+    function displayQuestions() {
+        quizContainer.innerHTML = '';
+        currentQuestions.forEach((q, index) => {
+            const qDiv = document.createElement('div');
+            qDiv.className = 'bg-white p-6 rounded-xl shadow-md';
+            // APIが生成するIDが不定なため、インデックスをIDとして使用
+            qDiv.id = `q-${index}`;
+
+            let content = `<div class="flex items-start"><span class="text-xl font-bold text-cyan-600 mr-3">${index + 1}.</span><div class="w-full">`;
+
+            let questionText = q.question;
+            if (q.type === 'reorder') {
+                questionText = `[ ${q.question.join(' / ')} ]`;
+            }
+
+            content += `<p class="text-lg mb-3">${String(questionText).replace('( _______ )', '<span class="font-bold text-red-500">( _______ )</span>')}</p>`;
+
+            if (q.type === 'choice') {
+                content += `<div class="space-y-2">`;
+                q.options.forEach(opt => {
+                    content += `<label class="flex items-center p-2 rounded-md border border-gray-200 hover:bg-gray-50 cursor-pointer"><input type="radio" name="q${index}" value="${opt}" class="mr-3 h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-300"><span>${opt}</span></label>`;
+                });
+                content += `</div>`;
+            } else if (q.type === 'reorder') {
+                 content += `<input type="text" id="ans-${index}" class="w-full p-2 border border-gray-300 rounded-md mt-2" placeholder="語順を並べ替えてください">`;
+            } else {
+                content += `<input type="text" id="ans-${index}" class="w-full p-2 border border-gray-300 rounded-md mt-2" placeholder="適切な語を入れてください">`;
+            }
+
+            content += `<p class="text-sm text-gray-500 mt-3">（${q.translation}）</p>`;
+            content += `<div id="feedback-${index}" class="mt-3 text-sm"></div>`;
+            content += `</div></div>`;
+            qDiv.innerHTML = content;
+            quizContainer.appendChild(qDiv);
+        });
+
+        controlsDiv.classList.remove('hidden');
+        resultText.textContent = '';
+    }
+
+    function checkAnswers() {
+        let correctCount = 0;
+        currentQuestions.forEach((q, index) => {
+            const qDiv = document.getElementById(`q-${index}`);
+            const feedbackDiv = document.getElementById(`feedback-${index}`);
+            let userAnswer;
+
+            if (q.type === 'choice') {
+                const selected = document.querySelector(`input[name="q${index}"]:checked`);
+                userAnswer = selected ? selected.value : '';
+            } else {
+                const input = document.getElementById(`ans-${index}`);
+                userAnswer = input ? input.value.trim() : '';
+            }
+
+            const isCorrect = userAnswer.toLowerCase().replace(/\./g, '') === q.answer.toLowerCase().replace(/\./g, '');
+
+            qDiv.classList.remove('correct', 'incorrect');
+            if (isCorrect) {
+                correctCount++;
+                qDiv.classList.add('correct');
+                feedbackDiv.innerHTML = `<span class="text-cyan-600 font-bold">正解！</span>`;
+            } else {
+                qDiv.classList.add('incorrect');
+                feedbackDiv.innerHTML = `<span class="text-red-500 font-bold">不正解。</span> 正しい答え: <span class="correct-answer">${q.answer}</span>`;
+            }
+        });
+
+        resultText.textContent = `結果: ${currentQuestions.length}問中 ${correctCount}問正解！`;
+    }
+
+    const pdfQuestionsBtn = document.getElementById('pdf-questions-btn');
+    const pdfAnswersBtn = document.getElementById('pdf-answers-btn');
+
+    pdfQuestionsBtn.addEventListener('click', () => downloadPDF(false));
+    pdfAnswersBtn.addEventListener('click', () => downloadPDF(true));
+
+    async function downloadPDF(includeAnswers) {
+        if (currentQuestions.length === 0) {
+            alert('まず問題を作成してください。');
+            return;
+        }
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        try {
+            doc.setFont('helvetica', 'normal');
+        } catch(e) {
+            console.error("Font loading error:", e);
+        }
+
+        const title = "中学英語文法パズル - " + (includeAnswers ? "解答" : "問題");
+        doc.text(title, 14, 20);
+        doc.setFontSize(12);
+
+        const tableColumn = ["No.", "問題", "和訳"];
+        if (includeAnswers) {
+            tableColumn.push("解答");
+        }
+        const tableRows = [];
+
+        currentQuestions.forEach((q, index) => {
+            let questionText = q.question;
+            if (q.type === 'reorder') {
+                questionText = `並べ替え: [ ${q.question.join(' / ')} ]`;
+            } else if (q.type === 'choice') {
+                questionText += ` ( ${q.options.join(' / ')} )`;
+            }
+            const safeQuestion = String(questionText).replace(/[^\x00-\x7F]/g, "?");
+            const safeTranslation = q.translation.replace(/[^\x00-\x7F]/g, "?");
+            const safeAnswer = q.answer.replace(/[^\x00-\x7F]/g, "?");
+
+            const row = [index + 1, safeQuestion, safeTranslation];
+            if (includeAnswers) {
+                row.push(safeAnswer);
+            }
+            tableRows.push(row);
+        });
+
+        doc.autoTable({
+            head: [tableColumn],
+            body: tableRows,
+            startY: 30,
+            styles: { font: 'helvetica' },
+            headStyles: { fillColor: [22, 160, 133] },
+        });
+
+        doc.save(title + ".pdf");
+    }
+
+</script>
+
+</body>
+</html>
