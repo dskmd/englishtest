@@ -3,10 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>中学英語文法パズルアプリ (Gemini API連携版)</title>
+    <title>中学英語文法パズルアプリ (PDF日本語対応版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- jsPDF本体と、テーブル作成プラグイン -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+    
+    <!-- 日本語フォントを読み込むためのスクリプト -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/canvg/1.5/canvg.min.js"></script>
+    <script src="https://unpkg.com/jspdf-font-add/dist/jspdf.font.add.js"></script>
+
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
     <style>
         body {
@@ -92,7 +98,7 @@
                 </button>
             </div>
         </div>
-
+        
         <!-- ローディング表示 -->
         <div id="loading" class="text-center hidden">
             <div class="loader"></div>
@@ -131,30 +137,27 @@
         loadingDiv.classList.remove('hidden');
         quizContainer.innerHTML = '';
         controlsDiv.classList.add('hidden');
-
+        
         const unit = document.getElementById('unit-select').options[document.getElementById('unit-select').selectedIndex].text;
         const textbook = document.getElementById('textbook-select').options[document.getElementById('textbook-select').selectedIndex].text;
         const count = parseInt(document.getElementById('q-count').value);
 
-        // --- Gemini APIへの直接の呼び出しではなく、中継サーバー（サーバーレス関数）を呼び出す ---
         try {
-            // このURLはデプロイ先（Netlifyなど）のサーバーレス関数のエンドポイントを指します
-            // 例: Netlifyの場合 '/.netlify/functions/generate-questions'
-            const proxyUrl = '/api/generate-questions';
+            const proxyUrl = '/api/generate-questions'; 
 
             const response = await fetch(proxyUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ unit, textbook, count }) // 必要な情報をサーバーに送る
+                body: JSON.stringify({ unit, textbook, count })
             });
 
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || `サーバーエラー: ${response.statusText}`);
             }
-
+            
             const result = await response.json();
-
+            
             if (result.questions) {
                 currentQuestions = result.questions;
                 displayQuestions();
@@ -179,18 +182,17 @@
         currentQuestions.forEach((q, index) => {
             const qDiv = document.createElement('div');
             qDiv.className = 'bg-white p-6 rounded-xl shadow-md';
-            // APIが生成するIDが不定なため、インデックスをIDとして使用
             qDiv.id = `q-${index}`;
 
             let content = `<div class="flex items-start"><span class="text-xl font-bold text-cyan-600 mr-3">${index + 1}.</span><div class="w-full">`;
-
+            
             let questionText = q.question;
             if (q.type === 'reorder') {
                 questionText = `[ ${q.question.join(' / ')} ]`;
             }
 
             content += `<p class="text-lg mb-3">${String(questionText).replace('( _______ )', '<span class="font-bold text-red-500">( _______ )</span>')}</p>`;
-
+            
             if (q.type === 'choice') {
                 content += `<div class="space-y-2">`;
                 q.options.forEach(opt => {
@@ -220,7 +222,7 @@
             const qDiv = document.getElementById(`q-${index}`);
             const feedbackDiv = document.getElementById(`feedback-${index}`);
             let userAnswer;
-
+            
             if (q.type === 'choice') {
                 const selected = document.querySelector(`input[name="q${index}"]:checked`);
                 userAnswer = selected ? selected.value : '';
@@ -241,7 +243,7 @@
                 feedbackDiv.innerHTML = `<span class="text-red-500 font-bold">不正解。</span> 正しい答え: <span class="correct-answer">${q.answer}</span>`;
             }
         });
-
+        
         resultText.textContent = `結果: ${currentQuestions.length}問中 ${correctCount}問正解！`;
     }
 
@@ -256,15 +258,26 @@
             alert('まず問題を作成してください。');
             return;
         }
-
+        
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
 
+        // --- ★★★ 日本語対応のための修正箇所 ★★★ ---
+        // 1. 日本語フォントファイルを読み込む
+        // (軽量なNoto Sans JPのサブセットフォントを使用)
+        const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP-Regular.ttf';
+        
         try {
-            doc.setFont('helvetica', 'normal');
-        } catch(e) {
-            console.error("Font loading error:", e);
+            // フォントをjsPDFに登録
+            await doc.addFontFromUrl(fontUrl, 'NotoSansJP');
+            // 登録したフォントをPDF全体で使用するように設定
+            doc.setFont('NotoSansJP');
+        } catch (e) {
+            console.error("フォントの読み込みに失敗しました。標準フォントで続行します。", e);
+            // フォント読み込み失敗時は標準フォントを使う（文字化けの可能性あり）
+            doc.setFont('helvetica');
         }
+        // --- ★★★ 修正箇所ここまで ★★★ ---
 
         const title = "中学英語文法パズル - " + (includeAnswers ? "解答" : "問題");
         doc.text(title, 14, 20);
@@ -283,13 +296,10 @@
             } else if (q.type === 'choice') {
                 questionText += ` ( ${q.options.join(' / ')} )`;
             }
-            const safeQuestion = String(questionText).replace(/[^\x00-\x7F]/g, "?");
-            const safeTranslation = q.translation.replace(/[^\x00-\x7F]/g, "?");
-            const safeAnswer = q.answer.replace(/[^\x00-\x7F]/g, "?");
-
-            const row = [index + 1, safeQuestion, safeTranslation];
+            // 文字化け対策の replace を削除
+            const row = [index + 1, String(questionText), q.translation];
             if (includeAnswers) {
-                row.push(safeAnswer);
+                row.push(q.answer);
             }
             tableRows.push(row);
         });
@@ -298,8 +308,15 @@
             head: [tableColumn],
             body: tableRows,
             startY: 30,
-            styles: { font: 'helvetica' },
-            headStyles: { fillColor: [22, 160, 133] },
+            styles: { 
+                font: 'NotoSansJP', // テーブル内でも日本語フォントを指定
+                cellPadding: 2,
+                fontSize: 10,
+            },
+            headStyles: { 
+                fillColor: [22, 160, 133],
+                font: 'NotoSansJP'
+            },
         });
 
         doc.save(title + ".pdf");
